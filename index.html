@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>✨ GlowDoodle</title>
+    <!-- Use Google Fonts for dynamic, sleek look -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Lightweight MediaPipe Dependencies pinned to exact fast versions -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Inter', sans-serif;
+        }
+
+        #video-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        video, canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror effect */
+        }
+
+        /* Bottom Controls - Translucent Glass Effect */
+        #controls {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 30px;
+            padding: 16px 36px;
+            
+            background: rgba(30, 30, 30, 0.4);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+            z-index: 10;
+        }
+
+        /* Color Palette */
+        .color-palette {
+            display: flex;
+            gap: 14px;
+        }
+
+        .color-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            outline: none;
+        }
+
+        .color-btn:hover {
+            transform: scale(1.15);
+        }
+
+        .color-btn.active {
+            border-color: white;
+            transform: scale(1.2);
+        }
+
+        /* Neon Colors */
+        .color-purple { background: #b026ff; box-shadow: 0 0 15px #b026ff; }
+        .color-red { background: #ff003c; box-shadow: 0 0 15px #ff003c; }
+        .color-blue { background: #00e5ff; box-shadow: 0 0 15px #00e5ff; }
+        .color-green { background: #39ff14; box-shadow: 0 0 15px #39ff14; }
+        .color-yellow { background: #fffb00; box-shadow: 0 0 15px #fffb00; }
+
+        /* Thickness Slider */
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #fff;
+            font-weight: 500;
+        }
+        
+        .slider-container span {
+            font-size: 14px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        input[type="range"] {
+            accent-color: #fff;
+            width: 140px;
+            cursor: pointer;
+        }
+
+        /* Clear Button */
+        #clear-btn, #undo-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 10px 24px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 15px;
+            letter-spacing: 0.5px;
+            transition: all 0.2s ease;
+        }
+
+        #clear-btn:hover, #undo-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
+        }
+
+        #clear-btn:active, #undo-btn:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+    
+    <!-- Video and Canvas layers -->
+    <div id="video-container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <!-- UI Controls -->
+    <div id="controls">
+        <div class="color-palette">
+            <div tabindex="0" class="color-btn color-purple active" data-color="#b026ff"></div>
+            <div tabindex="0" class="color-btn color-red" data-color="#ff003c"></div>
+            <div tabindex="0" class="color-btn color-blue" data-color="#00e5ff"></div>
+            <div tabindex="0" class="color-btn color-green" data-color="#39ff14"></div>
+            <div tabindex="0" class="color-btn color-yellow" data-color="#fffb00"></div>
+        </div>
+
+        <div class="slider-container">
+            <span>Size</span>
+            <input type="range" id="thickness" min="2" max="30" value="10">
+        </div>
+
+        <button id="undo-btn">↩️ Undo</button>
+        <button id="clear-btn">Clear</button>
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        // DOM elements
+        const video = document.getElementById("webcam");
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        const colorBtns = document.querySelectorAll(".color-btn");
+        const thicknessSlider = document.getElementById("thickness");
+        const clearBtn = document.getElementById("clear-btn");
+        const undoBtn = document.getElementById("undo-btn");
+
+        // Initialization Logic
+        let currentColor = "#b026ff";
+        let currentThickness = 10;
+        
+        // Undo system
+        let undoStack = [];
+        
+        function saveState() {
+            if (!ctx) return;
+            undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+            if (undoStack.length > 11) { // 1 base + 10 undo states
+                undoStack.shift();
+            }
+        }
+        
+        function undo() {
+            if (undoStack.length > 1) {
+                undoStack.pop(); // remove current state
+                const previousState = undoStack[undoStack.length - 1];
+                ctx.putImageData(previousState, 0, 0);
+            }
+        }
+
+        // Tracking fingertips positions to draw lines
+        const prevPositions = {}; 
+
+        function onResults(results) {
+            // Keep canvas native dimensions perfectly matched
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                if (video.videoWidth && video.videoHeight) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    ctx.lineCap = "round";
+                    ctx.lineJoin = "round";
+                    // Initialize empty state once canvas has valid dimensions
+                    undoStack = [ctx.getImageData(0, 0, canvas.width, canvas.height)];
+                }
+            }
+
+            // RULE 3 - NO RANDOM MARKS: If no landmarks, skip silently
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                results.multiHandLandmarks.forEach((landmarks, handIndex) => {
+                    const fingerKey = `hand_${handIndex}`;
+                    
+                    // RULE 1 - WHEN TO DRAW: Index finger pointing straight up
+                    const isExtended = landmarks[8].y < landmarks[7].y && 
+                                       landmarks[7].y < landmarks[6].y && 
+                                       landmarks[6].y < landmarks[5].y; 
+                    
+                    // RULE 2 - WHEN TO STOP: If index is not extended, curl stops drawing
+                    if (!isExtended) {
+                        if (prevPositions[fingerKey]) {
+                            delete prevPositions[fingerKey];
+                            saveState(); // User lifted finger, save canvas state
+                        }
+                        return;
+                    }
+                    
+                    const px = landmarks[8].x * canvas.width;
+                    const py = landmarks[8].y * canvas.height;
+
+                    // RULE 5 - NO GAPS: Only call ctx.beginPath when switching from not-drawing to drawing state.
+                    if (!prevPositions[fingerKey]) {
+                        // Mark first point, don't draw yet
+                        prevPositions[fingerKey] = { x: px, y: py, midX: px, midY: py };
+                        return;
+                    }
+
+                    const prev = prevPositions[fingerKey];
+                    
+                    // RULE 4 - SMOOTH LINES: midpoint between consecutive positions for smooth curves. No lerp.
+                    const midX = (prev.x + px) / 2;
+                    const midY = (prev.y + py) / 2;
+                    
+                    // Isolate segment to draw it exactly ONCE
+                    ctx.beginPath();
+                    ctx.moveTo(prev.midX, prev.midY);
+                    ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+
+                    // Neon styling setup
+                    ctx.save();
+                    ctx.lineCap = "round";
+                    ctx.lineJoin = "round";
+                    ctx.globalCompositeOperation = 'screen'; 
+
+                    // Outer glow layer
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = currentColor;
+                    ctx.lineWidth = currentThickness + 4;
+                    ctx.strokeStyle = currentColor;
+                    ctx.globalAlpha = 0.3;
+                    ctx.stroke();
+
+                    // Middle glow layer
+                    ctx.shadowBlur = 8;
+                    ctx.lineWidth = currentThickness + 1;
+                    ctx.globalAlpha = 0.7;
+                    ctx.stroke();
+
+                    // Center sharp line
+                    ctx.shadowBlur = 0;
+                    ctx.lineWidth = currentThickness - 1;
+                    ctx.strokeStyle = '#FFFFFF';
+                    ctx.globalAlpha = 1.0;
+                    ctx.stroke();
+                    
+                    ctx.restore();
+
+                    prevPositions[fingerKey] = { x: px, y: py, midX: midX, midY: midY };
+                });
+            }
+        }
+
+        // Bootstrapping legacy lightweight API
+        const hands = new window.Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`;
+        }});
+        
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1, // Good balance of precision vs speed loading
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        
+        hands.onResults(onResults);
+
+        // Hardware access via camera utility
+        const camera = new window.Camera(video, {
+            onFrame: async () => {
+                await hands.send({image: video});
+            },
+            width: 1920,
+            height: 1080
+        });
+        camera.start();
+
+        // --- Hardware Interface Controls ---
+        colorBtns.forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                colorBtns.forEach(b => b.classList.remove("active"));
+                e.target.classList.add("active");
+                currentColor = e.target.getAttribute("data-color");
+            });
+        });
+
+        thicknessSlider.addEventListener("input", (e) => {
+            currentThickness = parseInt(e.target.value);
+        });
+
+        clearBtn.addEventListener("click", () => {
+             ctx.save();
+             ctx.shadowColor = "transparent";
+             ctx.shadowBlur = 0;
+             ctx.clearRect(0, 0, canvas.width, canvas.height);
+             ctx.restore();
+             // Important: save state so this clear can be undone or so next stroke has an empty base
+             saveState();
+        });
+
+        undoBtn.addEventListener("click", undo);
+        
+        // Keyboard shortcut Ctrl+Z
+        document.addEventListener("keydown", (e) => {
+            if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+                undo();
+            }
+        });
+
+    </script>
+</body>
+</html>
